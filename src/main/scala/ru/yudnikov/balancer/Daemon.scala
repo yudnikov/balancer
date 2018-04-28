@@ -44,7 +44,9 @@ object Daemon extends App with Loggable {
     }.toOption.getOrElse(State(config))
   }
 
-  var serverSource = Http().bind(config.getString("app.host"), config.getInt("app.port"))
+  val host = config.getString("app.host")
+  val port = config.getInt("app.port")
+  var serverSource = Http().bind(host, port)
 
   def requestHandler(address: InetAddress): HttpRequest => HttpResponse = {
     case HttpRequest(GET, uri@Uri.Path("/balance"), _, _, _) =>
@@ -94,6 +96,7 @@ object Daemon extends App with Loggable {
       connection handleWithSyncHandler requestHandler(connection.remoteAddress.getAddress)
     }).run()
 
+  logger.info(s"service is online @ http://$host:$port")
   StdIn.readLine(s"press Enter to quit...\n")
 
   private def takeSnapshot(): Unit = {
