@@ -1,9 +1,11 @@
 package ru.yudnikov.balancer
 
-import ru.yudnikov.balancer.Daemon.{Available, Client, Reserved, ReservedByClient, Server}
+import com.typesafe.config.Config
+import ru.yudnikov.balancer.Daemon.{Available, Client, Reserved, ReservedByClient, Server, config, logger}
 
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.collection.JavaConverters._
 
 /**
   * Class represents current state. Assume, that it should guarantee data consistency, and has strategy "highest
@@ -38,6 +40,7 @@ case class State(available: Available, reserved: Reserved) extends Loggable {
 
   /**
     * When client wants to release some throughput
+    *
     * @param client
     * @return new State
     */
@@ -62,6 +65,7 @@ case class State(available: Available, reserved: Reserved) extends Loggable {
   /**
     * Makes new Reserved, when Client wants to reserve amount of Server's throughput, adds request amount to current
     * reserved data
+    *
     * @param client
     * @param server
     * @param amount
@@ -74,5 +78,17 @@ case class State(available: Available, reserved: Reserved) extends Loggable {
     else
       reservedByClient + (server -> amount)
     reserved + (client -> newReserveByClient)
+  }
+}
+
+object State extends Loggable {
+  def apply(config: Config)(implicit ordering: Ordering[BigInt]): State = {
+    lazy val initAvailable: Available = {
+      //logger.debug(s"no file available, initializing from config")
+      config.getObject("servers").unwrapped().asScala.toList.map { case (ip, t) =>
+        ip -> scala.math.BigInt(t.asInstanceOf[Int])
+      }
+    }
+    State(initAvailable.sortBy(_._2), Map())
   }
 }

@@ -37,17 +37,11 @@ object Daemon extends App with Loggable {
   // may be restored from data/state.json or initialized from config
   var state: State = {
     logger.debug(s"initializing State")
-    lazy val initAvailable: Available = {
-      logger.debug(s"no file available, initializing from config")
-      config.getObject("servers").unwrapped().asScala.toList.map { case (ip, t) =>
-        ip -> t.asInstanceOf[BigInt]
-      }
-    }
     Try(Source.fromFile("data/state.json")).map { file =>
       val json = file.mkString
       logger.debug(s"state is taken from file:\n\t$json")
       Serialization.read[State](json)
-    }.toOption.getOrElse(State(initAvailable.sortBy(_._2), Map()))
+    }.toOption.getOrElse(State(config))
   }
 
   var serverSource = Http().bind(config.getString("app.host"), config.getInt("app.port"))

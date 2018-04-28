@@ -19,5 +19,5 @@ libraryDependencies ++= Seq(
   // json4s
   "org.json4s" %% "json4s-jackson" % "3.5.3",
   // test
-  "org.scalatest" %% "scalatest" % "3.2.0-SNAP10" % Test,
+  "org.scalatest" %% "scalatest" % "3.0.5",
 )
