@@ -24,7 +24,7 @@ case class State(available: Available, reserved: Reserved) extends Loggable {
     * @return new State
     */
   @tailrec
-  final def reserve(client: Client, requested: Int)(implicit ordering: Ordering[Int]): State = {
+  final def reserve(client: Client, requested: BigInt)(implicit ordering: Ordering[BigInt]): State = {
     available match {
       case (server, amount) :: tail if amount >= requested =>
         val newAvailable = if (amount > requested) server -> (amount - requested) :: tail else tail
@@ -41,7 +41,7 @@ case class State(available: Available, reserved: Reserved) extends Loggable {
     * @param client
     * @return new State
     */
-  def release(client: Client)(implicit ordering: Ordering[Int]): State = {
+  def release(client: Client)(implicit ordering: Ordering[BigInt]): State = {
     // mutable map for convenience
     val availableMap = mutable.LinkedHashMap(available: _*)
     val newReserved: Reserved = reserved.get(client) match {
@@ -67,7 +67,7 @@ case class State(available: Available, reserved: Reserved) extends Loggable {
     * @param amount
     * @return new Reserved
     */
-  private def newReserved(client: Client, server: Server, amount: Int): Reserved = {
+  private def newReserved(client: Client, server: Server, amount: BigInt): Reserved = {
     val reservedByClient: ReservedByClient = reserved.getOrElse(client, Map())
     val newReserveByClient: ReservedByClient = if (reservedByClient contains server)
       reservedByClient + (server -> (reservedByClient(server) + amount))
