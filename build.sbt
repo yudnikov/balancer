@@ -16,7 +16,6 @@ libraryDependencies ++= Seq(
   "com.typesafe.scala-logging" %% "scala-logging" % "3.9.0",
   // config
   "com.typesafe" % "config" % "1.2.1",
-  // akka persistence
-  "com.typesafe.akka" %% "akka-persistence" % "2.5.11",
-  "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8",
+  // json4s
+  "org.json4s" %% "json4s-jackson" % "3.5.3",
 )

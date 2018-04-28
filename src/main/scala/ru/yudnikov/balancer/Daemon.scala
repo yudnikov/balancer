@@ -1,5 +1,6 @@
 package ru.yudnikov.balancer
 
+import java.io.FileWriter
 import java.net.InetAddress
 
 import akka.actor.{ActorSystem, Props}
@@ -10,68 +11,82 @@ import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
 import akka.pattern.ask
 import com.typesafe.config.{Config, ConfigFactory}
+import org.json4s.{DefaultFormats, Formats}
+import org.json4s.jackson.Serialization
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.io.{Source, StdIn}
 import scala.util.{Failure, Success, Try}
 
-object Daemon extends App {
-  
+object Daemon extends App with Loggable {
+
+  type Client = String
+  type Server = String
+  type ReservedByClient = Map[Server, Int]
+  type Reserved = Map[Client, ReservedByClient]
+  type Available = List[(Server, Int)]
+
   implicit val config: Config = ConfigFactory.load()
   implicit val system: ActorSystem = ActorSystem()
   implicit val materializer: ActorMaterializer = ActorMaterializer()
   implicit val executionContext: ExecutionContext = system.dispatcher
+  implicit val formats: Formats = DefaultFormats
 
-  @tailrec
-  case class Servers(available: List[(String, Int)], reserved: Map[String, Map[String, Int]]) {
-    def reserve(client: String, requested: Int): Servers = {
-      available match {
-        case (server, amount) :: tail if amount >= requested =>
-          val newAvailable = if (amount > requested) server -> (amount - requested) :: tail else tail
-          Servers(newAvailable, newReserved(client, server, requested))
-        case (server, amount) :: tail =>
-          Servers(tail, newReserved(client, server, requested - amount)).reserve(client, requested - amount)
-        case Nil =>
-          throw new Exception(s"Wee need more servers, My Lord!")
+  // define some strategy which servers may be reserved first
+  implicit val intOrdering: Ordering[Int] = (x, y) => y compareTo x
+
+  // may be restored from data/state.json or initialized from config
+  var state = {
+    logger.debug(s"initializing State")
+    lazy val initAvailable: Available = {
+      logger.debug(s"no file available, initializing from config")
+      config.getObject("servers").unwrapped().asScala.toList.map { case (ip, t) =>
+        ip -> t.asInstanceOf[Int]
       }
     }
-    private def newReserved(client: String, server: String, amount: Int) = {
-      val newReserveByClient = {
-        val reservedByClient = reserved.getOrElse(client, Map())
-        if (reservedByClient contains server) reservedByClient + (server -> (reservedByClient(server) + amount))
-        else reservedByClient + (server -> amount)
-      }
-      reserved + (client -> newReserveByClient)
-    }
+    Try(Source.fromFile("data/state.json")).map { file =>
+      val json = file.mkString
+      logger.debug(s"state is taken from file:\n\t$json")
+      Serialization.read[State](json)
+    }.toOption.getOrElse(State(initAvailable.sortBy(_._2), Map()))
   }
-
-  val initAvailable: List[(String, Int)] = config.getObject("servers").unwrapped().asScala.toList.map { case (ip, t) =>
-    ip -> t.asInstanceOf[Int]
-  }
-  var state = Servers(initAvailable, Map())
 
   var serverSource = Http().bind(config.getString("app.host"), config.getInt("app.port"))
 
   def requestHandler(address: InetAddress): HttpRequest => HttpResponse = {
     case HttpRequest(GET, uri@Uri.Path("/balance"), _, _, _) =>
+      logger.debug(s"received GET $uri request")
       uri.query() match {
         case Uri.Query.Cons("throughput", str, _) if str.nonEmpty && str.forall(_.isDigit) =>
           Try(state.reserve(address.toString, str.toInt)) match {
-            case Success(servers) =>
-              state = servers
-              HttpResponse(200, entity = HttpEntity(state.reserved(address.toString).toString()))
+            case Success(newState) =>
+              logger.debug(s"mutating state to $newState")
+              state = newState
+              HttpResponse(200, entity = HttpEntity(state.reserved(address.toString).toString))
             case Failure(exception) =>
-              exception.printStackTrace()
+              logger.error(s"failure", exception)
               HttpResponse(500)
           }
-
-        case _ =>
-          sys.error("BOOM!")
+        case x =>
+          sys.error(s"Invalid params $x")
       }
-    case HttpRequest(POST, Uri.Path("/end"), _, _, _) =>
-      HttpResponse(200)
+    case HttpRequest(POST, uri@Uri.Path("/end"), _, _, _) =>
+      logger.debug(s"received GET $uri request")
+      Try(state.release(address.toString)) match {
+        case Success(newState) =>
+          logger.debug(s"mutating state to $newState")
+          state = newState
+          HttpResponse(200)
+        case Failure(exception) =>
+          logger.error(s"failure", exception)
+          sys.error(exception.getMessage)
+      }
+    case HttpRequest(GET, Uri.Path("/state"), _, _, _) =>
+      HttpResponse(200, entity = HttpEntity(state.toString))
     case _ =>
       HttpResponse(404, entity = "Not found!")
   }
@@ -80,5 +95,13 @@ object Daemon extends App {
     serverSource.to(Sink.foreach { connection =>
       connection handleWithSyncHandler requestHandler(connection.remoteAddress.getAddress)
     }).run()
+
+  StdIn.readLine(s"press Enter to quit...\n")
+
+  val snapshot = Serialization.writePretty(state)
+  val pw = new FileWriter("data/state.json")
+  pw.write(snapshot)
+  pw.close()
+  system.terminate()
 
 }
